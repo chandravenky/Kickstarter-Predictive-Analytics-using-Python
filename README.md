@@ -8,6 +8,8 @@ Kickstarter is an American public-benefit corporation that maintains a global cr
 
 Step 1: The original dataset had 45 variables (including predictor and target). Some of them were removed before including them in our model and the list below talks about them:<br/>
 
+![Kickstarter - data description](https://user-images.githubusercontent.com/54965123/68997557-cfe04a00-0875-11ea-9abf-e33cb8e4bd53.PNG)
+
 Step 2: Filtered only for successful and failed projects. (2973 rows got removed)<br/>
 
 Step 3: Dropped rows having any NA values. This operation is performed after removing the launch_to_state_change_days column (which has 70% NA values). 1471 rows got removed<br/>
@@ -29,22 +31,24 @@ Step 10: For the classification task, the Y variable is state, while for the reg
 # Section 3. Summary Statistics
 Before we discuss feature selection, it is important to understand the summary statistics for the shortlisted X-variables as shown below:
 
+![Kickstarter- summary stats](https://user-images.githubusercontent.com/54965123/68997558-cfe04a00-0875-11ea-84c8-00f5dedc097f.PNG)
+
 
 # Section 4. Feature selection
 Next, feature selection was performed to select the predictors which play a significant role in explaining the variation between X and Y better. There are 3 methods of carrying out feature selection. For each method, we tweak the value of parameters to get the best set of features (for ex: RFE is model dependent, LASSO depends on α, and Random Forest depends on gini threshold). 
 
-
-
 **Feature selection results for the classification task:**
 
-
+![Results Classification - Kickstarter](https://user-images.githubusercontent.com/54965123/68997559-cfe04a00-0875-11ea-9a12-86c68444e534.PNG)
 
 **Feature selection results for regression task (for only the Random Forest selection method)**
 
+![Results Regression- Kickstarter](https://user-images.githubusercontent.com/54965123/68997560-cfe04a00-0875-11ea-885c-0d81dd2a278a.PNG)
 
 # Section 5. Final Model selection 
 Clearly, Random Forest model seems to be the winner with features selected using the Random Forest feature Selection method. Upon finding the best hyperparameters, the best accuracy obtained is 74.48% and the mean squared error is 1.06 billion. See below:
 
+![Best hyperparameters Kickstarter - Random Forest](https://user-images.githubusercontent.com/54965123/68997555-cfe04a00-0875-11ea-8f78-7924b0a4b070.PNG)
 
 Model selection was done considering the time constraint. The below algorithms were not run:
 
@@ -59,7 +63,7 @@ Based on the train dataset, 2 supervised models were built to predict the pledge
 The MSE is $1.02 Billion, therefore the error is $31,937, which means that the regression model will able to predict the pledged amount for a project with an error of +$31,937 and -$31,937.<br/>
 **Classification model :** Using the confusion matrix (shown below), 5 metrics were calculated (shown below) to get statistical and business interpretation of the model  (Section 3.2.3.2 in code):
 
-
+![Kickstarter - confusion matrix](https://user-images.githubusercontent.com/54965123/68997556-cfe04a00-0875-11ea-8a21-da34fe0de270.PNG)
 
 Translating the metrics shown above into business language (retaining the same order)
 
