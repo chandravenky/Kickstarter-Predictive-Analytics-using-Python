@@ -1,0 +1,792 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Nov  1 20:08:03 2019
+
+@author: vchan
+"""
+
+#Hello
+
+
+#Please enter the path of training and test datasets
+#=======================================================================================================
+#=======================================================================================================
+import pandas as pd
+import numpy as np
+from scipy import stats
+kick_train_data=pd.read_excel("")
+kick_test_data = pd.read_excel("")
+
+#=======================================================================================================
+#=======================================================================================================
+
+
+
+
+#Code starts here
+
+#Import required functions
+from sklearn import preprocessing
+label_encoder = preprocessing.LabelEncoder() 
+
+#**********************************
+#--Section 1.1: Data preprocessing
+#**********************************
+
+kick_train_data = kick_train_data[(kick_train_data.state=="successful") | (kick_train_data.state=="failed")]
+kick_test_data = kick_test_data[(kick_test_data.state=="successful") | (kick_test_data.state=="failed")]
+
+
+#Define  a function to detect outliers
+
+def num_outlier_drop(dataframe, z_max=3):
+    threshold = dataframe.select_dtypes(include=[np.number]) \
+        .apply(lambda x: np.abs(stats.zscore(x)) < z_max, reduce=False) \
+        .all(axis=1)
+    dataframe.drop(dataframe.index[~threshold], inplace=True)
+
+#Remove nulls in data after removing launch_to_state_change_days
+kick_train_data = kick_train_data.drop(['launch_to_state_change_days'],axis = 1)
+kick_test_data = kick_test_data.drop(['launch_to_state_change_days'],axis = 1)
+
+#Drop NA Values
+kick_train_data = kick_train_data.dropna()
+kick_test_data = kick_test_data.dropna()
+
+#Drop outliers
+num_outlier_drop(kick_train_data)
+
+num_outlier_drop(kick_test_data)
+
+concat_data = pd.concat([kick_train_data, kick_test_data], axis=0)
+
+#--Bucketing to limit the number of dummy variables 
+bins_days = [0,7,14,21,32] 
+bins_hr = [0,8,16,25]
+
+concat_data['deadline_day'] = pd.cut(concat_data['deadline_day'], bins_days) 
+concat_data['deadline_hr'] = pd.cut(concat_data['deadline_hr'], bins_hr) 
+concat_data['created_at_day'] = pd.cut(concat_data['created_at_day'], bins_days) 
+concat_data['created_at_hr'] = pd.cut(concat_data['created_at_hr'], bins_hr) 
+concat_data['launched_at_day'] = pd.cut(concat_data['launched_at_day'], bins_days) 
+concat_data['launched_at_hr'] = pd.cut(concat_data['launched_at_hr'], bins_hr)
+
+concat_data["goal"] = concat_data["goal"]*concat_data["static_usd_rate"] #keeping us currency 
+
+#-------------------------------------------
+#--Section 1.2: REGRESSION SPECIFIC data manipulation
+#-------------------------------------------
+ 
+#Select relevant columns 
+X_reg=concat_data[['goal','country','category','name_len_clean','blurb_len_clean','deadline_weekday','created_at_weekday','launched_at_weekday','deadline_month','deadline_day','deadline_yr','deadline_hr','created_at_month','created_at_day','created_at_yr','created_at_hr','launched_at_month','launched_at_day','launched_at_yr','launched_at_hr','create_to_launch_days','launch_to_deadline_days']]
+#removed currency (perfectly correlated with country), backers_count (realized after), static_usd_rate(not needed) 
+y_reg=concat_data['usd_pledged']
+
+
+#Dummify the features with more than 2 categories 
+X_reg = pd.get_dummies(X_reg, columns = ['country','category','deadline_weekday','created_at_weekday','launched_at_weekday','deadline_month','deadline_day','deadline_yr','deadline_hr','created_at_month','created_at_day','created_at_yr','created_at_hr','launched_at_month','launched_at_day','launched_at_yr','launched_at_hr'])
+corr_matrix = X_reg.corr(method="pearson")
+
+#Get the train and test dataset for regression
+X_regtrain = X_reg.iloc[:12953][:]
+X_regtest = X_reg.iloc[12953:][:]
+
+y_regtrain = y_reg.iloc[:12953]
+y_regtest = y_reg.iloc[12953:]
+
+testdata_reg = pd.concat([X_regtest,pd.DataFrame(y_regtest)], axis = 1)
+testdata_reg = testdata_reg.dropna()
+y_regtest = testdata_reg.usd_pledged
+X_regtest = testdata_reg.iloc[:,:-1]
+
+#--------------------------------------------------
+#--Section 1.3: CLASSIFICATION specific data manipulation
+#--------------------------------------------------
+
+#--Select relevant columns 
+X=concat_data[['goal','country','category','name_len_clean','blurb_len_clean','deadline_weekday','created_at_weekday','launched_at_weekday','deadline_month','deadline_day','deadline_yr','deadline_hr','created_at_month','created_at_day','created_at_yr','created_at_hr','launched_at_month','launched_at_day','launched_at_yr','launched_at_hr','create_to_launch_days','launch_to_deadline_days']]
+y=concat_data['state']
+
+#--Dummify the features
+X = pd.get_dummies(X, columns = ['country','category','deadline_weekday','created_at_weekday','launched_at_weekday','deadline_month','deadline_day','deadline_yr','deadline_hr','created_at_month','created_at_day','created_at_yr','created_at_hr','launched_at_month','launched_at_day','launched_at_yr','launched_at_hr'])
+
+#Get the train and test dataset
+X_train = X.iloc[:12953][:]
+X_test = X.iloc[12953:][:]
+
+y_train = y.iloc[:12953]
+y_test = y.iloc[12953:]
+
+testdata = pd.concat([X_test,pd.DataFrame(y_test)], axis = 1)
+testdata = testdata.dropna()
+y_test = testdata.state
+X_test = testdata.iloc[:,:-1]
+
+#---------------------------------
+#--Section 1.4: Regression Model
+#---------------------------------
+feature_list_reg =  X_regtrain[['goal','create_to_launch_days','name_len_clean','blurb_len_clean','launch_to_deadline_days','category_Web','category_Software','category_Hardware','launched_at_weekday_Tuesday','launched_at_hr_(0, 8]','category_Wearables','deadline_hr_(0, 8]','created_at_weekday_Monday','category_Gadgets','created_at_weekday_Saturday','created_at_month_8','created_at_day_(21, 32]','deadline_day_(7, 14]','deadline_day_(0, 7]','category_Robots','deadline_hr_(8, 16]','deadline_month_11','deadline_weekday_Friday','deadline_weekday_Thursday','deadline_month_4','created_at_day_(0, 7]','country_ES','created_at_weekday_Friday','deadline_day_(21, 32]','launched_at_day_(7, 14]','created_at_weekday_Thursday','deadline_month_6','created_at_hr_(8, 16]','launched_at_yr_2013','deadline_month_9','launched_at_weekday_Wednesday','created_at_month_12','category_Sound','launched_at_day_(0, 7]','deadline_weekday_Sunday','launched_at_month_4','created_at_day_(7, 14]','created_at_weekday_Tuesday','launched_at_day_(14, 21]','deadline_day_(14, 21]','launched_at_month_3','deadline_month_12','deadline_yr_2016','created_at_month_3','deadline_yr_2013','created_at_month_5','created_at_hr_(0, 8]','deadline_hr_(16, 25]','launched_at_weekday_Sunday','deadline_month_5','created_at_weekday_Wednesday','created_at_yr_2016','launched_at_hr_(8, 16]','launched_at_month_7','launched_at_weekday_Thursday','created_at_day_(14, 21]','launched_at_yr_2016','created_at_month_4','created_at_month_2','deadline_yr_2015','deadline_yr_2017','country_GB','launched_at_weekday_Monday','launched_at_month_10','created_at_hr_(16, 25]','created_at_month_9','launched_at_day_(21, 32]','deadline_weekday_Monday','country_NL','deadline_month_7','created_at_month_6','deadline_weekday_Tuesday','deadline_weekday_Wednesday','deadline_month_3','country_US','country_AT','deadline_yr_2014','launched_at_month_2','country_BE','launched_at_month_6','created_at_yr_2013','deadline_month_2','created_at_weekday_Sunday','created_at_yr_2015','launched_at_month_11','created_at_month_11','launched_at_month_5','created_at_month_7','created_at_month_1','country_DE','launched_at_yr_2014','launched_at_month_9','launched_at_month_12','created_at_yr_2012','created_at_yr_2014','created_at_month_10','deadline_month_10','deadline_weekday_Saturday','deadline_month_8','category_Apps','launched_at_month_8','launched_at_hr_(16, 25]','launched_at_yr_2015','launched_at_weekday_Friday','country_FR','category_Musical','country_AU','launched_at_yr_2012','category_Flight','deadline_month_1','launched_at_month_1','country_CA','country_IE','country_CH','deadline_yr_2012','country_IT','launched_at_weekday_Saturday','category_Spaces','category_Immersive','created_at_yr_2011','category_Makerspaces','category_Festivals','category_Plays','category_Blues','launched_at_yr_2017','category_Webseries','created_at_yr_2017','country_SG','category_Experimental','country_NZ','category_Shorts','category_Places','category_Thrillers','category_Academic','category_Comedy']]
+test_feature_list_reg = X_regtest[['goal','create_to_launch_days','name_len_clean','blurb_len_clean','launch_to_deadline_days','category_Web','category_Software','category_Hardware','launched_at_weekday_Tuesday','launched_at_hr_(0, 8]','category_Wearables','deadline_hr_(0, 8]','created_at_weekday_Monday','category_Gadgets','created_at_weekday_Saturday','created_at_month_8','created_at_day_(21, 32]','deadline_day_(7, 14]','deadline_day_(0, 7]','category_Robots','deadline_hr_(8, 16]','deadline_month_11','deadline_weekday_Friday','deadline_weekday_Thursday','deadline_month_4','created_at_day_(0, 7]','country_ES','created_at_weekday_Friday','deadline_day_(21, 32]','launched_at_day_(7, 14]','created_at_weekday_Thursday','deadline_month_6','created_at_hr_(8, 16]','launched_at_yr_2013','deadline_month_9','launched_at_weekday_Wednesday','created_at_month_12','category_Sound','launched_at_day_(0, 7]','deadline_weekday_Sunday','launched_at_month_4','created_at_day_(7, 14]','created_at_weekday_Tuesday','launched_at_day_(14, 21]','deadline_day_(14, 21]','launched_at_month_3','deadline_month_12','deadline_yr_2016','created_at_month_3','deadline_yr_2013','created_at_month_5','created_at_hr_(0, 8]','deadline_hr_(16, 25]','launched_at_weekday_Sunday','deadline_month_5','created_at_weekday_Wednesday','created_at_yr_2016','launched_at_hr_(8, 16]','launched_at_month_7','launched_at_weekday_Thursday','created_at_day_(14, 21]','launched_at_yr_2016','created_at_month_4','created_at_month_2','deadline_yr_2015','deadline_yr_2017','country_GB','launched_at_weekday_Monday','launched_at_month_10','created_at_hr_(16, 25]','created_at_month_9','launched_at_day_(21, 32]','deadline_weekday_Monday','country_NL','deadline_month_7','created_at_month_6','deadline_weekday_Tuesday','deadline_weekday_Wednesday','deadline_month_3','country_US','country_AT','deadline_yr_2014','launched_at_month_2','country_BE','launched_at_month_6','created_at_yr_2013','deadline_month_2','created_at_weekday_Sunday','created_at_yr_2015','launched_at_month_11','created_at_month_11','launched_at_month_5','created_at_month_7','created_at_month_1','country_DE','launched_at_yr_2014','launched_at_month_9','launched_at_month_12','created_at_yr_2012','created_at_yr_2014','created_at_month_10','deadline_month_10','deadline_weekday_Saturday','deadline_month_8','category_Apps','launched_at_month_8','launched_at_hr_(16, 25]','launched_at_yr_2015','launched_at_weekday_Friday','country_FR','category_Musical','country_AU','launched_at_yr_2012','category_Flight','deadline_month_1','launched_at_month_1','country_CA','country_IE','country_CH','deadline_yr_2012','country_IT','launched_at_weekday_Saturday','category_Spaces','category_Immersive','created_at_yr_2011','category_Makerspaces','category_Festivals','category_Plays','category_Blues','launched_at_yr_2017','category_Webseries','created_at_yr_2017','country_SG','category_Experimental','country_NZ','category_Shorts','category_Places','category_Thrillers','category_Academic','category_Comedy']]
+from sklearn.ensemble import RandomForestRegressor 
+
+reg_model_RF = RandomForestRegressor(random_state = 0, max_features = 14, max_depth = 9, min_samples_split = 40, min_samples_leaf = 10, bootstrap = 1, n_estimators = 100)
+reg_model_fit= reg_model_RF.fit(feature_list_reg, y_regtrain)
+
+y_regtest_pred= reg_model_fit.predict(test_feature_list_reg)
+
+from sklearn.metrics import mean_squared_error
+mse = mean_squared_error(y_regtest, y_regtest_pred)
+
+#---------------------------------
+#--Section 1.5: Classification Model
+#---------------------------------
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score
+import numpy as np
+
+feature_list =  X_train[['launched_at_yr_2011','country_LU','goal','launched_at_month_3','deadline_month_11','create_to_launch_days','launched_at_weekday_Monday','blurb_len_clean','deadline_month_5','deadline_month_6','launched_at_month_11','launched_at_weekday_Sunday','launched_at_month_9','created_at_month_7','category_Wearables','launched_at_month_7','created_at_weekday_Wednesday','created_at_weekday_Monday','deadline_weekday_Wednesday','launch_to_deadline_days','launched_at_weekday_Thursday','deadline_weekday_Monday','launched_at_month_2','launched_at_weekday_Wednesday','deadline_month_12','deadline_month_4','launched_at_month_10','created_at_month_8','created_at_month_11','created_at_month_9','created_at_yr_2016','created_at_weekday_Thursday','created_at_month_4','launched_at_month_5','created_at_yr_2015','created_at_weekday_Friday','created_at_weekday_Sunday','deadline_hr_(16, 25]','country_CA','deadline_month_7','created_at_month_10','created_at_month_12','launched_at_yr_2016','country_NL','created_at_month_1','created_at_weekday_Saturday','launched_at_yr_2013','deadline_month_3','created_at_yr_2013','created_at_yr_2014','created_at_month_2','deadline_weekday_Tuesday','created_at_weekday_Tuesday','launched_at_month_4','deadline_month_10','deadline_month_8','launched_at_hr_(16, 25]','launched_at_month_1','launched_at_month_12','deadline_month_1','deadline_month_2','launched_at_month_8','name_len_clean','deadline_day_(0, 7]','deadline_day_(7, 14]','deadline_day_(14, 21]','deadline_day_(21, 32]','launched_at_day_(0, 7]','launched_at_day_(14, 21]','launched_at_day_(21, 32]','launched_at_day_(7, 14]','created_at_day_(14, 21]','created_at_day_(7, 14]','created_at_day_(0, 7]','created_at_day_(21, 32]','category_Makerspaces','category_Gadgets','category_Hardware','category_Apps','deadline_yr_2013','deadline_yr_2014','created_at_month_3','deadline_weekday_Thursday','deadline_weekday_Friday','launched_at_weekday_Saturday','deadline_weekday_Saturday','deadline_weekday_Sunday','created_at_yr_2012','launched_at_yr_2012','created_at_yr_2011','created_at_month_6','launched_at_month_6','created_at_month_5','deadline_month_9','country_AU','launched_at_weekday_Friday','deadline_hr_(0, 8]','created_at_hr_(0, 8]','created_at_hr_(16, 25]','created_at_hr_(8, 16]','launched_at_yr_2015','country_FR','country_NZ','launched_at_weekday_Tuesday','country_DE','deadline_hr_(8, 16]','launched_at_hr_(8, 16]','deadline_yr_2012','country_GB','country_US','country_CH','country_IE','country_SG','category_Robots','category_Comedy','created_at_yr_2017','launched_at_hr_(0, 8]','category_Sound','launched_at_yr_2017','deadline_yr_2016','deadline_yr_2017','deadline_yr_2015','launched_at_yr_2014','category_Spaces','country_ES','category_Flight','category_Musical','category_Immersive','category_Experimental','country_AT','category_Plays','category_Festivals','country_BE','category_Software','category_Webseries','country_IT','category_Academic','category_Thrillers','category_Web','category_Blues','category_Places','category_Shorts']]
+test_feature_list = X_test[['launched_at_yr_2011','country_LU','goal','launched_at_month_3','deadline_month_11','create_to_launch_days','launched_at_weekday_Monday','blurb_len_clean','deadline_month_5','deadline_month_6','launched_at_month_11','launched_at_weekday_Sunday','launched_at_month_9','created_at_month_7','category_Wearables','launched_at_month_7','created_at_weekday_Wednesday','created_at_weekday_Monday','deadline_weekday_Wednesday','launch_to_deadline_days','launched_at_weekday_Thursday','deadline_weekday_Monday','launched_at_month_2','launched_at_weekday_Wednesday','deadline_month_12','deadline_month_4','launched_at_month_10','created_at_month_8','created_at_month_11','created_at_month_9','created_at_yr_2016','created_at_weekday_Thursday','created_at_month_4','launched_at_month_5','created_at_yr_2015','created_at_weekday_Friday','created_at_weekday_Sunday','deadline_hr_(16, 25]','country_CA','deadline_month_7','created_at_month_10','created_at_month_12','launched_at_yr_2016','country_NL','created_at_month_1','created_at_weekday_Saturday','launched_at_yr_2013','deadline_month_3','created_at_yr_2013','created_at_yr_2014','created_at_month_2','deadline_weekday_Tuesday','created_at_weekday_Tuesday','launched_at_month_4','deadline_month_10','deadline_month_8','launched_at_hr_(16, 25]','launched_at_month_1','launched_at_month_12','deadline_month_1','deadline_month_2','launched_at_month_8','name_len_clean','deadline_day_(0, 7]','deadline_day_(7, 14]','deadline_day_(14, 21]','deadline_day_(21, 32]','launched_at_day_(0, 7]','launched_at_day_(14, 21]','launched_at_day_(21, 32]','launched_at_day_(7, 14]','created_at_day_(14, 21]','created_at_day_(7, 14]','created_at_day_(0, 7]','created_at_day_(21, 32]','category_Makerspaces','category_Gadgets','category_Hardware','category_Apps','deadline_yr_2013','deadline_yr_2014','created_at_month_3','deadline_weekday_Thursday','deadline_weekday_Friday','launched_at_weekday_Saturday','deadline_weekday_Saturday','deadline_weekday_Sunday','created_at_yr_2012','launched_at_yr_2012','created_at_yr_2011','created_at_month_6','launched_at_month_6','created_at_month_5','deadline_month_9','country_AU','launched_at_weekday_Friday','deadline_hr_(0, 8]','created_at_hr_(0, 8]','created_at_hr_(16, 25]','created_at_hr_(8, 16]','launched_at_yr_2015','country_FR','country_NZ','launched_at_weekday_Tuesday','country_DE','deadline_hr_(8, 16]','launched_at_hr_(8, 16]','deadline_yr_2012','country_GB','country_US','country_CH','country_IE','country_SG','category_Robots','category_Comedy','created_at_yr_2017','launched_at_hr_(0, 8]','category_Sound','launched_at_yr_2017','deadline_yr_2016','deadline_yr_2017','deadline_yr_2015','launched_at_yr_2014','category_Spaces','country_ES','category_Flight','category_Musical','category_Immersive','category_Experimental','country_AT','category_Plays','category_Festivals','country_BE','category_Software','category_Webseries','country_IT','category_Academic','category_Thrillers','category_Web','category_Blues','category_Places','category_Shorts']]
+
+# Best Model
+rfc= RandomForestClassifier(random_state=5, max_features= 76, max_depth =8, min_samples_split=53, min_samples_leaf=9, bootstrap=0, n_estimators=100)
+rfc_fit= rfc.fit(feature_list, y_train)
+
+# Predict state
+y_test_pred= rfc.predict(test_feature_list)
+y_test_pred = pd.Series(y_test_pred)
+
+# Accuracy
+from sklearn.metrics import accuracy_score
+score = accuracy_score(y_test, y_test_pred)
+
+#-----------------------------------------
+#--------------Print Results--------------
+#-----------------------------------------
+
+print("The MSE for the regression model is {}. In Billions it it {}".format(mse, round((mse/1000000000),2)))
+print("Accuracy score of the classication task is {}".format(score))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----------------------------------Appendix Section-------------------------------------------
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#Note: If you are working on feature selection, change the working directors using the below command
+
+#change working directory
+#import os
+#os.chdir(r'C:\Users\vchan\OneDrive\Desktop\INSY 662 - Data mining\Individual project - mid term')
+
+#*******************************************************************************************
+#__________________________APPENDIX FOR TASK 1 : REGRESSION_________________________________
+#*******************************************************************************************
+
+
+'''
+#----------------------------------------------------------------------------------------------
+#--------------------------Section 2 RANDOM FOREST FEATURE SELECTION---------------------------
+#----------------------------------------------------------------------------------------------
+
+X = X_regtrain
+y = y_regtrain
+
+from sklearn.ensemble import RandomForestRegressor 
+randomforest = RandomForestRegressor(random_state=0)
+model = randomforest.fit(X_regtrain,y_regtrain)
+
+
+from sklearn.feature_selection import SelectFromModel
+sfm = SelectFromModel(model, threshold=0.05)
+sfm.fit(X_regtrain,y_regtrain)
+for feature_list_index in sfm.get_support(indices=True):
+    print(X_regtrain.columns[feature_list_index])
+
+
+
+random_forest_output = pd.DataFrame(list(zip(X.columns,model.feature_importances_)), columns = ['predictor','Gini coefficient'])
+random_forest_output_pred = random_forest_output[random_forest_output['Gini coefficient'] != 0]
+random_forest_output_pred_a= random_forest_output_pred.sort_values("Gini coefficient", ascending = False)
+feature_list_a = np.transpose((random_forest_output_pred_a["predictor"]))
+feature_list = X[feature_list_a][:]
+
+
+#----------------------------------------------------------------------------------------------
+#-----------------------------Section 2.1 Model Building---------------------------------------
+#----------------------------------------------------------------------------------------------    
+
+#-------------------------------------
+# Section 2.1.1Linear Regression
+#-------------------------------------   
+    
+# Load libraries
+from sklearn.linear_model import LinearRegression
+import pandas
+
+# Import data
+
+# Separate the data
+from sklearn.model_selection import train_test_split
+X_regtrain_train, X_regtrain_test, y_regtrain_train, y_regtrain_test = train_test_split(feature_list, y_regtrain, test_size =0.3, random_state=3)
+
+# Run linear regression
+lm= LinearRegression()
+model1 = lm.fit(X_regtrain_train, y_regtrain_train)
+
+# Using the model to predict the results based on the test dataset
+y_regtrain_test_pred = lm.predict(X_regtrain_test)
+
+# Calculate the mean squared error of the prediction
+from sklearn.metrics import mean_squared_error
+mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+print(mse)
+
+#-------------------------------------
+#----Section 2.1.2 KNN
+#-------------------------------------
+
+# Load libraries
+from sklearn.neighbors import KNeighborsRegressor
+import pandas
+
+from sklearn.preprocessing import StandardScaler
+standardizer= StandardScaler()
+X_regtrain_std = standardizer.fit_transform(feature_list)
+
+# Separate the data
+from sklearn.model_selection import train_test_split
+X_regtrain_train, X_regtrain_test, y_regtrain_train, y_regtrain_test = train_test_split(X_regtrain_std, y_regtrain, test_size=0.33, random_state=3)
+
+# Run K-NN
+max_mse = 0
+max_i = 0
+
+from sklearn.metrics import mean_squared_error
+#i is number of neighbours
+for i in range(2,5):
+    knn= KNeighborsRegressor(n_neighbors=i)
+    model = knn.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred = knn.predict(X_regtrain_test)
+    mse=mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse > max_mse:
+        max_mse = mse
+        max_i = i
+
+print(max_mse)
+print(max_i)
+
+
+#-------------------------------------
+#----Section 2.1.3 Random Forest
+#-------------------------------------
+
+# Load libraries
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_squared_error
+import pandas
+
+# Separate the data
+from sklearn.model_selection import train_test_split
+X_regtrain_train, X_regtrain_test, y_regtrain_train, y_regtrain_test = train_test_split(feature_list, y_regtrain, test_size=0.3, random_state=5)
+
+# Run random forest
+
+#Play with max_features
+max_mse = 999999999999999999999999999999
+best_i = 0
+for i in range(2,140):
+    rf = RandomForestRegressor(random_state=0, n_estimators=100, max_features = i)
+    model= rf.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred= rf.predict(X_regtrain_test)
+    mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse < max_mse:
+        max_mse = mse
+        best_i = i
+        
+
+#Play with max_depth
+max_mse = 999999999999999999999999999999
+best_i = 0
+for i in range(2,50): #152
+    rf = RandomForestRegressor(random_state=0, n_estimators=100, max_depth = i)
+    model= rf.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred= rf.predict(X_regtrain_test)
+    mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse < max_mse:
+        max_mse = mse
+        best_i = i
+        
+#Play with min_samples_split
+max_mse = 9999999999999
+best_i = 0
+for i in range(2,50):
+    rf = RandomForestRegressor(random_state=0, n_estimators=100, min_samples_split = i)
+    model= rf.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred= rf.predict(X_regtrain_test)
+    mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse < max_mse:
+        max_mse = mse
+        best_i = i
+
+#Play with min_samples_leaf
+max_mse = 9999999999999
+best_i = 0
+for i in range(2,50):
+    rf = RandomForestRegressor(random_state=0, n_estimators=100, min_samples_leaf = i)
+    model= rf.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred= rf.predict(X_regtrain_test)
+    mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse < max_mse:
+        max_mse = mse
+        best_i = i
+
+#Play with bootstrap
+max_mse = 9999999999999
+best_i = 0
+for i in range(0,2): 
+    rf = RandomForestRegressor(random_state=0, n_estimators=100, bootstrap = i)
+    model= rf.fit(X_regtrain_train, y_regtrain_train)
+    y_regtrain_test_pred= rf.predict(X_regtrain_test)
+    mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+    if mse < max_mse:
+        max_mse = mse
+        best_i = i
+
+# With all hyperparameters
+reg_model_RF = RandomForestRegressor(random_state = 0, max_features = 14, max_depth = 9, min_samples_split = 49, min_samples_leaf = 10, bootstrap = 1, n_estimators = 100)
+reg_model_fit= reg_model_RF.fit(X_regtrain_train, y_regtrain_train)
+y_regtrain_test_pred= reg_model_fit.predict(X_regtrain_test)
+
+from sklearn.metrics import mean_squared_error
+mse = mean_squared_error(y_regtrain_test, y_regtrain_test_pred)
+print(mse)
+
+#----------------------------------------------
+#--Section 2.1.4 Interpretation of the model
+#----------------------------------------------
+
+#Calculate R squared for regression model
+
+#Regression model
+y_regtrain_test_mean= y_regtrain_test.mean()
+R2 = 1 - (sum((y_regtrain_test-y_regtrain_test_pred)**2)/sum((y_regtrain_test-y_regtrain_test_mean)**2))
+R2
+
+'''
+#*******************************************************************************************
+#_______________________APPENDIX FOR TASK 2 : CLASSIFICATION________________________________
+#*******************************************************************************************
+
+"""
+#**************************************************************************************
+#-----------------------------Section 3.1: Feature selections--------------------------
+#**************************************************************************************
+
+#Change X and y variables
+X = X_train
+y= y_train
+
+#--Correlation matrix
+corr_matrix = X.corr(method="pearson")
+#Removed currency (perfectly correlated with country)
+
+#----------------------------------------------------------------------------------------------
+#-----------------------------Section 3.2.1: RFE-----------------------------------------------
+#----------------------------------------------------------------------------------------------
+
+#-------------------------------------
+#Section 3.2.1.1: Logistic Regression
+#-------------------------------------
+
+from sklearn.linear_model import LogisticRegression 
+from sklearn.feature_selection import RFE 
+from sklearn.model_selection import train_test_split 
+from sklearn import metrics 
+
+lr = LogisticRegression()
+rfe = RFE(lr,1)             #Feature rank 1 gives ranking for all the variables
+rfe_model= rfe.fit(X,y)
+rank_output_df = pd.DataFrame(list(zip(X.columns,rfe_model.ranking_)), columns = ['Feature','Rank'])
+
+rank_output_df = pd.DataFrame(list(zip(X.columns, rfe_model.ranking_)), columns = ['predictor','Rank'])
+rank_output_df_pred = rank_output_df[rank_output_df['Rank'] != 0]
+rank_output_df_pred1= rank_output_df_pred.sort_values("Rank", ascending = False)
+subset_list1 = np.transpose((rank_output_df_pred1["predictor"]))
+subset = X[subset_list1][:]
+
+
+#Calculate the number of predictors which are the best set
+num_pred = [25,50,70,110,171]
+accuracy_score_metric = [] 
+predictor_cnt = [] 
+
+for i in num_pred:    
+    X1 = subset.iloc[:,:i]
+    X_train, X_test, y_train, y_test = train_test_split(X1,y, test_size=0.33, random_state=5)
+    # Run the model
+    lr3=LogisticRegression()
+    model3 = lr3.fit(X_train, y_train)
+    y_test_pred = lr3.predict(X_test)
+    predictor_cnt.append(i)
+    accuracy_score_metric.append(metrics.accuracy_score(y_test,y_test_pred))
+
+max(accuracy_score_metric)              #This gives us the best set 110-70
+
+#Re run the loop in the range 110-70
+
+accuracy_score_metric = [] 
+predictor_cnt = [] 
+
+for i in range(110,171):    
+    X1 = subset.iloc[:,:i]
+    X_train, X_test, y_train, y_test = train_test_split(X1,y, test_size=0.33, random_state=5)
+    # Run the model
+    lr3=LogisticRegression()
+    model3 = lr3.fit(X_train, y_train)
+    y_test_pred = lr3.predict(X_test)
+    predictor_cnt.append(i)
+    accuracy_score_metric.append(metrics.accuracy_score(y_test,y_test_pred))
+
+accuracy_score_metric
+
+#-------------------------------------
+#Section 3.2.1.2: Random Forest
+#-------------------------------------
+
+from sklearn.ensemble import RandomForestClassifier 
+from sklearn.model_selection import cross_val_score 
+import numpy 
+
+rf= RandomForestClassifier(random_state=0)
+rfe = RFE(rf,1)             #Feature rank 1 gives ranking for all the variables
+rfe_model_rf= rfe.fit(X,y)
+rank_output_df = pd.DataFrame(list(zip(X.columns,rfe_model_rf.ranking_)), columns = ['Feature','Rank'])
+
+rank_output_df = pd.DataFrame(list(zip(X.columns, rfe_model_rf.ranking_)), columns = ['predictor','Rank'])
+rank_output_df_pred = rank_output_df[rank_output_df['Rank'] != 0]
+rank_output_df_pred1= rank_output_df_pred.sort_values("Rank", ascending = False)
+subset_list1 = np.transpose((rank_output_df_pred1["predictor"]))
+subset = X[subset_list1][:]
+
+
+num_pred = [25,50,70,110,142]
+max_score = [] 
+max_i = 0
+
+for i in num_pred:
+    rfc = RandomForestClassifier(random_state=5, max_features =i)
+    X_i = subset.iloc[:,:i]  
+    scores = cross_val_score(estimator = rfc, X=X_i, y=y, cv=5)
+    print(i,numpy.average(scores))
+    max_score.append(numpy.average(scores))
+    
+max(max_score)                      #The maximum accuracy is in the bucket 110-142
+
+#Re run with range 110-142
+
+max_score = [] 
+max_i = 0
+
+for i in range(110,142):
+    rfc = RandomForestClassifier(random_state=5, max_features =i)
+    X_i = subset.iloc[:,:i]  
+    scores = cross_val_score(estimator = rfc, X=X_i, y=y, cv=5)
+    print(i,numpy.average(scores))
+    max_score.append(numpy.average(scores))
+    
+max(max_score)
+
+#The best accuracy is at 173 predictors - 73.37%%
+
+#SVM takes a lot of time to run
+#KNN does not run on RFE
+
+#----------------------------------------------------------------------------------------------
+#-----------------------------Section 3.2.2: LASSO---------------------------------------------
+#----------------------------------------------------------------------------------------------
+
+from sklearn.preprocessing import StandardScaler 
+scaler= StandardScaler() 
+X_std= scaler.fit_transform(X) 
+y_dummy = label_encoder.fit_transform(y)
+
+#alpha =.01
+from sklearn.linear_model import Lasso
+lasso_model = Lasso(alpha=0.01, positive=True)
+lasso_model.fit(X_std,y_dummy)
+lasso_alpha_01 = pd.DataFrame(list(zip(X.columns,lasso_model.coef_)), columns = ['Feature','Coefficient'])
+
+lasso_alpha_01 = pd.DataFrame(list(zip(X.columns,lasso_model.coef_)), columns = ['predictor','Gini coefficient'])
+lasso_alpha_01_pred = lasso_alpha_01[lasso_alpha_01['Gini coefficient'] != 0]
+lasso_alpha_01_pred1= lasso_alpha_01_pred.sort_values("Gini coefficient", ascending = False)
+x1 = np.transpose((lasso_alpha_01_pred1["predictor"]))
+x2 = X[x1][:]
+
+#Running the above feature selection model with different values of alpha does not yield better results
+
+#-----------------------------------------------
+#----------Section 3.2.2.1: Logistic Regression
+#-----------------------------------------------
+    
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import cross_val_score 
+
+lr3=LogisticRegression()
+model3 = lr3.fit(x2,y)
+scores = cross_val_score(estimator=model3, X=x2, y=y, cv=5)
+numpy.average(scores)
+
+#------------------------------------------
+#----------Section 3.2.2.2: Random Forest
+#------------------------------------------
+
+from sklearn.ensemble import RandomForestClassifier 
+randomforest = RandomForestClassifier(random_state=0)
+model4 = randomforest.fit(x2,y)
+from sklearn.model_selection import cross_val_score 
+scores = cross_val_score(estimator=model4, X=x2, y=y, cv=5)
+numpy.average(scores)
+
+#-------------------------------------
+#----------Section 3.2.2.3: SVM
+#-------------------------------------
+
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+import numpy as np
+
+#Scale
+scaler = StandardScaler()
+X_std = scaler.fit_transform(x2)
+
+#Sigmoid
+svc = SVC(kernel="sigmoid", random_state=0) 
+model = svc.fit(X_std, y)
+scores = cross_val_score(estimator=model, X=X_std, y=y, cv=5)
+numpy.average(scores)
+
+
+#rbf
+svc = SVC(kernel="rbf", random_state=0)
+model = svc.fit(X_std, y)
+scores = cross_val_score(estimator=model, X=X_std, y=y, cv=5)
+np.average(scores)
+
+
+#linear
+svc = SVC(kernel="linear", random_state=0)
+model = svc.fit(X_std, y)
+scores = cross_val_score(estimator=model, X=X_std, y=y, cv=5)
+np.average(scores)
+
+
+#----------------------------------------------------------------------------------------------
+#-----------------------Section 3.2.3: RANDOM FOREST FEATURE SELECTION-------------------------
+#----------------------------------------------------------------------------------------------
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_selection import SelectFromModel 
+
+randomforest = RandomForestClassifier(random_state=0)
+ 
+model = randomforest.fit(X,y)
+
+sfm = SelectFromModel(model, threshold=0.05)
+sfm.fit(X,y)
+for feature_list_index in sfm.get_support(indices=True):
+    print(X.columns[feature_list_index])
+ 
+rfrf = pd.DataFrame(list(zip(X.columns,model.feature_importances_)), columns = ['predictor','Gini coefficient'])
+ 
+random_forest_output = pd.DataFrame(list(zip(X.columns,model.feature_importances_)), columns = ['predictor','Gini coefficient'])
+random_forest_output_pred = random_forest_output[random_forest_output['Gini coefficient'] != 0]
+random_forest_output_pred1= random_forest_output_pred.sort_values("Gini coefficient", ascending = False)
+feature_list1 = np.transpose((random_forest_output_pred1["predictor"]))
+feature_list = X[feature_list1][:]
+
+#------------------------------------------------
+#------Section 3.2.3.1: Logistic Regression
+#------------------------------------------------
+    
+from sklearn.linear_model import LogisticRegression
+import numpy as np
+
+lr = LogisticRegression()
+
+max_score = 0
+max_i = 0
+num_pred = [25,70,95,100,153]
+
+for i in num_pred:
+    lr = LogisticRegression()
+    X_i = feature_list.iloc[:,:i]  
+    scores = cross_val_score(estimator = lr, X=X_i, y=y, cv=5)
+    print(i,scores)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+        
+#Best subset is 70-95
+
+max_score = 0
+max_i = 0
+for i in range(70,95):
+    lr = LogisticRegression()
+    X_i = feature_list.iloc[:,:i]  
+    scores = cross_val_score(estimator = lr, X=X_i, y=y, cv=5)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+
+#------------------------------------------------
+#------Section 3.2.3.2: Random Forest
+#------------------------------------------------
+        
+from sklearn.ensemble import RandomForestClassifier    
+from sklearn.model_selection import cross_val_score
+import numpy as np
+
+max_score = 0
+max_i = 0
+num_pred = [25,70,95,100,139]
+for i in num_pred:
+    rfc = RandomForestClassifier(random_state=5, max_features =i)
+    X_i = feature_list.iloc[:,:i]  
+    scores = cross_val_score(estimator = rfc, X=X_i, y=y, cv=5)
+    print(i,scores)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+
+#Best subset is at 70-95
+        
+max_score = 0
+max_i = 0
+for i in range(70,95):
+    rfc = RandomForestClassifier(random_state=5, max_features =i)
+    X_i = feature_list.iloc[:,:i]  
+    scores = cross_val_score(estimator = rfc, X=X_i, y=y, cv=5)
+    print(i,scores)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+        
+#Playing with max_depth parameter
+max_score = 0
+max_i = 0
+
+for i in range(2,20):
+    rfc = RandomForestClassifier(random_state=5, max_features =127, max_depth=i)
+    scores = cross_val_score(estimator = rfc, X=feature_list.iloc[:,:127], y=y, cv=5)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+
+#Playing with min_samples_split
+max_score = 0
+max_i = 0
+
+for i in range(2,127):
+    rfc = RandomForestClassifier(random_state=5, min_samples_split =i)
+    scores = cross_val_score(estimator = rfc, X=feature_list.iloc[:,:121], y=y, cv=5)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+
+#Playing with min_samples_leaf
+max_score = 0
+max_i = 0
+
+for i in range(2,127):
+    rfc = RandomForestClassifier(random_state=5, min_samples_leaf =i)
+    scores = cross_val_score(estimator = rfc, X=feature_list.iloc[:,:121], y=y, cv=5)
+    if np.average(scores)>max_score:
+        max_score = np.average(scores)
+        max_i = i
+
+#Playing with bootstrap
+
+rfc= RandomForestClassifier(random_state=5, bootstrap=0, n_estimators=100)
+scores = cross_val_score(estimator=rfc, X=feature_list.iloc[:,:121], y=y, cv=5)
+print(numpy.average(scores))
+
+#Random forest with the best hyperparameters
+rfc= RandomForestClassifier(random_state=5, max_features= 76, max_depth =8, min_samples_split=53, min_samples_leaf=9, bootstrap=0, n_estimators=100)
+scores = cross_val_score(estimator=rfc, X=feature_list.iloc[:,:121], y=y, cv=5)
+print(np.average(scores))
+
+#----------Interpretation of the best model
+
+from sklearn.model_selection import train_test_split
+X_train_rf, X_test_rf, y_train_rf, y_test_rf = train_test_split(feature_list, y, test_size = 0.3, random_state=5)
+
+from sklearn.ensemble import RandomForestClassifier
+randomforest = RandomForestClassifier()
+
+model=randomforest.fit(X_train_rf, y_train_rf)
+y_test_pred_rf = model.predict(X_test_rf)
+
+from sklearn.metrics import accuracy_score
+accuracy_score(y_test_rf, y_test_pred_rf)
+
+# Predict state
+y_test_pred_rf = pd.Series(y_test_pred_rf)
+acc_scores= pd.concat([y_test_rf, y_test_pred_rf], axis=1)
+acc_scores.to_csv("acc_scores.csv")
+
+#Classification model
+
+#Confusion matrix
+from sklearn.metrics import confusion_matrix
+print(confusion_matrix(y_test_rf, y_test_pred_rf))
+
+#Calculate precision
+from sklearn.metrics import precision_score
+print(precision_score(y_test_rf, y_test_pred_rf))
+
+#Calculate recall
+from sklearn.metrics import recall_score
+print(recall_score(y_test_rf, y_test_pred_rf))
+
+#Calculate f1 score
+from sklearn.metrics import f1_score
+print(confusion_matrix(y_test_rf, y_test_pred_rf))
+
+#------------------------------------------------
+#------Section 3.2.3.3: SVC
+#------------------------------------------------
+
+from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score
+from sklearn.preprocessing import StandardScaler
+
+standardiser = StandardScaler()
+max_score = 0
+max_i = 0
+num_pred = [25,50,95,110,139]
+
+
+X_std = standardiser.fit_transform(feature_list)
+X_std = pd.DataFrame(X_std)
+            
+#linear SVM model
+for i in num_pred:
+    svc = SVC(kernel="linear", random_state=0)
+    X_i = X_std.iloc[:,:i]  
+    scores = cross_val_score(estimator = svc, X=X_i, y=y, cv=5)
+    print(i,scores)
+
+
+#rbf SVM model
+for i in num_pred:
+    svc = SVC(kernel="rbf", random_state=0)
+    X_i = X_std.iloc[:,:i]  
+    scores = cross_val_score(estimator = svc, X=X_i, y=y, cv=5)
+    print(i,scores)
+
+#sigmoid SVM model
+for i in num_pred:
+    svc = SVC(kernel="sigmoid", random_state=0)
+    X_i = X_std.iloc[:,:i]  
+    scores = cross_val_score(estimator = svc, X=X_i, y=y, cv=5)
+    print(i,scores)
+
+"""
